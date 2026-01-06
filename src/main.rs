@@ -2,6 +2,7 @@ mod telegram;
 
 use telegram::auth::{authenticate, prompt_for_credentials};
 use telegram::client::TelegramClient;
+use telegram::updates::listen_for_updates;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,6 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("👤 Logged in as: @{}", me.username().unwrap_or("unknown"));
     println!();
+
+    // Start listening for messages
+    listen_for_updates(&tg.client).await?;
 
     Ok(())
 }
