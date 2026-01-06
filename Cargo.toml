@@ -1,0 +1,16 @@
+[package]
+name = "bifrost"
+version = "0.1.0"
+edition = "2021"
+description = "Telegram TUI client with Vim keybindings"
+license = "MIT"
+repository = "https://github.com/subh/bifrost"
+keywords = ["telegram", "tui", "vim", "cli", "chat"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+grammers-client = "0.6"
+grammers-session = "0.5"
+tokio = { version = "1", features = ["full"] }
+dotenvy = "0.15"
+
