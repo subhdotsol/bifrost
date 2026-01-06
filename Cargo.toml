@@ -1,12 +1,15 @@
 [package]
-name = "bifrost"
+name = "bifrost-tui"
 version = "0.1.0"
 edition = "2021"
-description = "Telegram TUI client with Vim keybindings"
+authors = ["Subh <your@email.com>"]
+description = "A blazing fast, Vim-native Telegram client for the terminal. Built with Rust, Ratatui, and Grammers."
 license = "MIT"
-repository = "https://github.com/subh/bifrost"
-keywords = ["telegram", "tui", "vim", "cli", "chat"]
-categories = ["command-line-utilities"]
+repository = "https://github.com/subhdotsol/bifrost"
+homepage = "https://github.com/subhdotsol/bifrost"
+readme = "README.md"
+keywords = ["telegram", "tui", "vim", "async", "chat"]
+categories = ["command-line-utilities", "network-programming", "asynchronous"]
 
 [dependencies]
 grammers-client = "0.6"
