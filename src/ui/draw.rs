@@ -205,19 +205,20 @@ fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
             let text_style = Style::default().fg(Color::Rgb(200, 200, 200));
             
             // First line: sender + text
-            if let Some(first_line) = wrapped_lines.first() {
-                // Heuristic: If sender name matches the Chat Title (and it's not empty),
-                // it's likely a DM where the header already says who it is.
-                // In that case, we can HIDE the sender name for a cleaner UI (and zero artifacts).
-                let mut current_chat_name = "Unknown";
-                if let Some(c) = app.chats.get(app.selected_chat) {
-                    current_chat_name = &c.name;
-                }
+            
+            // Heuristic: If sender name matches the Chat Title (and it's not empty),
+            // it's likely a DM where the header already says who it is.
+            let mut current_chat_name = "Unknown";
+            if let Some(c) = app.chats.get(app.selected_chat) {
+                current_chat_name = &c.name;
+            }
 
+            if let Some(first_line) = wrapped_lines.first() {
                 if sender_display == current_chat_name && current_chat_name != "Unknown" {
                     // Hide sender name, just show text (padded to align with other lines if desirable, 
                     // or just flush left. Standard TUI chat usually aligns flush left if no name).
                     items.push(ListItem::new(Line::from(vec![
+                        Span::raw("  "), // Left padding
                         Span::styled(first_line.clone(), text_style),
                     ])));
                 } else {
@@ -225,6 +226,7 @@ fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
                     // Pad aggressively to 20 chars to wipe any "Unknown" ghosting or artifacts
                     // format!("{:<20}", s) pads right with spaces to length 20.
                     items.push(ListItem::new(Line::from(vec![
+                        Span::raw("  "), // Left padding
                         Span::styled(format!("{:<20}", sender_display), sender_style),
                         Span::raw(": "), 
                         Span::styled(first_line.clone(), text_style),
@@ -233,7 +235,12 @@ fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
             }
             
             // Continuation lines with indent
-            let indent_len = sender_display.chars().count() + 4;
+            let indent_len = if sender_display == current_chat_name && current_chat_name != "Unknown" {
+                2 // Just the left padding
+            } else {
+                sender_display.chars().count() + 4 + 2 // Name + ": " + left padding
+            };
+
             for line_text in wrapped_lines.iter().skip(1) {
                 items.push(ListItem::new(Line::from(vec![
                     Span::raw(" ".repeat(indent_len)),

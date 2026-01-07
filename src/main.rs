@@ -12,6 +12,9 @@ use crossterm::{
 };
 use grammers_client::Update;
 use ratatui::{backend::CrosstermBackend, Terminal};
+use futures::{FutureExt, StreamExt};
+use tokio::sync::mpsc;
+use crossterm::event::EventStream;
 
 use app::App;
 use telegram::auth::{authenticate, prompt_for_credentials};
@@ -110,14 +113,86 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Let lazy loading handle message fetching for the first chat too
     app.needs_message_load = true;
 
+    // Create a channel for updates
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let client_clone = tg.client.clone();
+
+    // Spawn update listener task
+    tokio::spawn(async move {
+        loop {
+            match client_clone.next_update().await {
+                Ok(Some(update)) => {
+                    if tx.send(update).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    // Wait a bit before retrying on error
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+    });
+
     // Main loop
+    let mut reader = EventStream::new();
+
     loop {
         // Draw UI
         terminal.draw(|f| draw(f, &app))?;
 
-        // Check for quit
-        if app.should_quit {
-            break;
+        // Handle reloading status from previous loop
+        if app.reload_requested {
+            app.reload_requested = false;
+            // ... (reload logic is handled below in the select loop now via manual calls if needed, 
+            // but actually we should keep the reload logic inline or just trigger message fetch)
+             if let Some(chat_id) = app.current_chat_id() {
+                // Find the chat and fetch messages
+                let mut dialogs = tg.client.iter_dialogs();
+                while let Some(dialog) = dialogs.next().await? {
+                    if dialog.chat().id() == chat_id {
+                        // Clear existing messages for this chat
+                        app.messages.remove(&chat_id);
+
+                        // Fetch last 50 messages
+                        let mut messages_iter = tg.client.iter_messages(dialog.chat());
+                        let mut fetched = 0;
+                        while let Some(msg) = messages_iter.next().await? {
+                            if fetched >= 50 {
+                                break;
+                            }
+                            let sender = if msg.outgoing() {
+                                "You".to_string()
+                            } else {
+                                msg.sender()
+                                    .map(|s| {
+                                        let name = s.name().to_string();
+                                        if name.is_empty() {
+                                            dialog.chat().name().to_string()
+                                        } else {
+                                            name
+                                        }
+                                    })
+                                    .unwrap_or_else(|| dialog.chat().name().to_string())
+                            };
+                            app.add_message(
+                                chat_id,
+                                sender,
+                                msg.text().to_string(),
+                                msg.outgoing(),
+                            );
+                            fetched += 1;
+                        }
+
+                        // Reverse messages to show oldest first
+                        if let Some(msgs) = app.messages.get_mut(&chat_id) {
+                            msgs.reverse();
+                        }
+                        break;
+                    }
+                }
+            }
         }
 
         // Lazy-load messages for currently selected chat if needed
@@ -178,93 +253,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Handle reload request (r key)
-        if app.reload_requested {
-            app.reload_requested = false;
-            if let Some(chat_id) = app.current_chat_id() {
-                // Find the chat and fetch messages
-                let mut dialogs = tg.client.iter_dialogs();
-                while let Some(dialog) = dialogs.next().await? {
-                    if dialog.chat().id() == chat_id {
-                        // Clear existing messages for this chat
-                        app.messages.remove(&chat_id);
-
-                        // Fetch last 20 messages
-                        let mut messages_iter = tg.client.iter_messages(dialog.chat());
-                        let mut fetched = 0;
-                        while let Some(msg) = messages_iter.next().await? {
-                            if fetched >= 50 {
-                                break;
-                            }
-                            let sender = if msg.outgoing() {
-                                "You".to_string()
-                            } else {
-                                msg.sender()
-                                    .map(|s| {
-                                        let name = s.name().to_string();
-                                        if name.is_empty() {
-                                            dialog.chat().name().to_string()
-                                        } else {
-                                            name
+        tokio::select! {
+            // Handle Keyboard Input
+            maybe_event = reader.next().fuse() => {
+                match maybe_event {
+                    Some(Ok(Event::Key(key))) => {
+                         if let Some(message_to_send) = handle_key(&mut app, key) {
+                            // Send message to current chat
+                            if let Some(chat_id) = app.current_chat_id() {
+                                if let Some(chat) = app.chats.iter().find(|c| c.id == chat_id) {
+                                    // Find the actual chat to send to
+                                    let mut dialogs = tg.client.iter_dialogs();
+                                    while let Some(dialog) = dialogs.next().await? {
+                                        if dialog.chat().id() == chat_id {
+                                            tg.client
+                                                .send_message(dialog.chat(), message_to_send.clone())
+                                                .await?;
+                                            app.add_message(
+                                                chat_id,
+                                                "You".to_string(),
+                                                message_to_send,
+                                                true,
+                                            );
+                                            break;
                                         }
-                                    })
-                                    .unwrap_or_else(|| dialog.chat().name().to_string())
-                            };
-                            app.add_message(
-                                chat_id,
-                                sender,
-                                msg.text().to_string(),
-                                msg.outgoing(),
-                            );
-                            fetched += 1;
-                        }
-
-                        // Reverse messages to show oldest first
-                        if let Some(msgs) = app.messages.get_mut(&chat_id) {
-                            msgs.reverse();
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Poll for events (keyboard + telegram updates)
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if let Some(message_to_send) = handle_key(&mut app, key) {
-                    // Send message to current chat
-                    if let Some(chat_id) = app.current_chat_id() {
-                        if let Some(chat) = app.chats.iter().find(|c| c.id == chat_id) {
-                            // Find the actual chat to send to
-                            let mut dialogs = tg.client.iter_dialogs();
-                            while let Some(dialog) = dialogs.next().await? {
-                                if dialog.chat().id() == chat_id {
-                                    tg.client
-                                        .send_message(dialog.chat(), message_to_send.clone())
-                                        .await?;
-                                    app.add_message(
-                                        chat_id,
-                                        "You".to_string(),
-                                        message_to_send,
-                                        true,
-                                    );
-                                    break;
+                                    }
                                 }
                             }
                         }
+                        if app.should_quit {
+                            break;
+                        }
                     }
+                    Some(Err(e)) => println!("Error: {:?}\r", e),
+                    _ => {}
                 }
             }
-        }
 
-        // Check for Telegram updates (non-blocking)
-        tokio::select! {
-            update = tg.client.next_update() => {
-                if let Ok(Some(Update::NewMessage(msg))) = update {
+            // Handle Telegram Updates
+            Some(update) = rx.recv() => {
+               if let Update::NewMessage(msg) = update {
                     if !msg.outgoing() {
                         let chat = msg.chat();
-                        // Get sender name - fallback to chat name for private chats
                         // Get sender name - fallback to chat name for private chats
                         let mut sender_name = msg.sender()
                             .map(|s| {
@@ -283,8 +313,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if sender_name == "Unknown" {
                             // If it's a DM (positive ID), the chat name IS the sender name.
                             // Trust the chat name over "Unknown"
-                            if chat.id() > 0 && !chat.name().trim().is_empty() {
-                                sender_name = chat.name().to_string();
+                            let mut resolved_name = chat.name().to_string();
+                            
+                            // If even the chat name from the update is "Unknown", check our local cache
+                            if (resolved_name == "Unknown" || resolved_name.trim().is_empty()) && chat.id() > 0 {
+                                if let Some(existing_chat) = app.chats.iter().find(|c| c.id == chat.id()) {
+                                    resolved_name = existing_chat.name.clone();
+                                }
+                            }
+
+                            if chat.id() > 0 && !resolved_name.trim().is_empty() && resolved_name != "Unknown" {
+                                sender_name = resolved_name;
                             } else {
                                 // Fetch the latest dialog (which should be this new message)
                                 // This also naturally updates the cache
@@ -305,7 +344,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            _ = tokio::time::sleep(Duration::from_millis(10)) => {}
         }
     }
 
