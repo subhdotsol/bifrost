@@ -59,6 +59,8 @@ pub struct App {
     pub account_picker_selected: usize,
     pub switch_account_requested: Option<String>,
     pub add_account_requested: bool,
+    // Async loading state
+    pub pending_load: Option<i64>,
 }
 
 impl App {
@@ -88,6 +90,8 @@ impl App {
             account_picker_selected: 0,
             switch_account_requested: None,
             add_account_requested: false,
+            // Async loading
+            pending_load: None,
         }
     }
 

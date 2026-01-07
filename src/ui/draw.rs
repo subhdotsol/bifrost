@@ -76,28 +76,28 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let inner_area = outer.inner(frame.area());
     frame.render_widget(outer, frame.area());
 
-    // Split into main area and input box
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(5),      // Main panels
-            Constraint::Length(3),   // Input box
-        ])
-        .split(inner_area);
-
-    // Split main area into friends (left) and chats (right)
+    // Split into friends (left) and right side (chats + input)
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(30), // Friends panel
-            Constraint::Percentage(70), // Chats panel
+            Constraint::Percentage(30), // Friends panel (full height)
+            Constraint::Percentage(70), // Right side: Chats + Input
         ])
-        .split(vertical[0]);
+        .split(inner_area);
+
+    // Split right side into chats and input box
+    let right_vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(5),      // Chats panel
+            Constraint::Length(3),   // Input box (under chats only)
+        ])
+        .split(horizontal[1]);
 
     // Draw panels
     draw_friends_panel(frame, app, horizontal[0]);
-    draw_chats_panel(frame, app, horizontal[1]);
-    draw_input_box(frame, app, vertical[1]);
+    draw_chats_panel(frame, app, right_vertical[0]);
+    draw_input_box(frame, app, right_vertical[1]);
     
     // Draw account picker overlay if in that mode
     if app.mode == Mode::AccountPicker {

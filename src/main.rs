@@ -163,6 +163,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Create a channel for loaded messages (chat_id, messages)
+    type LoadedMessages = (i64, Vec<(String, String, bool)>);
+    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<LoadedMessages>();
+
     // Main loop
     let mut reader = EventStream::new();
 
@@ -223,60 +227,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Lazy-load messages for currently selected chat if needed
+        // Lazy-load messages for currently selected chat in background (non-blocking)
         if app.needs_message_load {
             app.needs_message_load = false;
             if let Some(chat_id) = app.current_chat_id() {
                 // Only load if we don't have messages for this chat yet
                 if !app.messages.contains_key(&chat_id) && chat_id != 1 {
-                    app.loading_status = Some("Loading messages...".to_string());
-                    terminal.draw(|f| draw(f, &app))?; // Show loading status
-
-                    // Find the dialog for this chat
-                    let mut dialogs = tg.client.iter_dialogs();
-                    while let Some(dialog) = dialogs.next().await? {
-                        if dialog.chat().id() == chat_id {
-                            let mut messages_iter = tg.client.iter_messages(dialog.chat());
-                            let mut fetched = 0;
-                            while let Some(msg) = messages_iter.next().await? {
-                                if fetched >= 50 {
+                    // Check if we're already loading this chat
+                    if app.pending_load != Some(chat_id) {
+                        app.loading_status = Some("Loading...".to_string());
+                        app.pending_load = Some(chat_id);
+                        
+                        // Spawn background loader (non-blocking!)
+                        let client = tg.client.clone();
+                        let loader_tx = msg_tx.clone();
+                        tokio::spawn(async move {
+                            // Find the dialog for this chat
+                            let mut dialogs = client.iter_dialogs();
+                            while let Ok(Some(dialog)) = dialogs.next().await {
+                                if dialog.chat().id() == chat_id {
+                                    let mut messages_iter = client.iter_messages(dialog.chat());
+                                    let mut loaded_msgs: Vec<(String, String, bool)> = Vec::new();
+                                    let mut fetched = 0;
+                                    while let Ok(Some(msg)) = messages_iter.next().await {
+                                        if fetched >= 50 {
+                                            break;
+                                        }
+                                        let sender = if msg.outgoing() {
+                                            "You".to_string()
+                                        } else {
+                                            msg.sender()
+                                                .map(|s| {
+                                                    let name = s.name().to_string();
+                                                    if name.trim().is_empty() {
+                                                        let cname = dialog.chat().name().to_string();
+                                                        if cname.trim().is_empty() { String::new() } else { cname }
+                                                    } else {
+                                                        name
+                                                    }
+                                                })
+                                                .unwrap_or_else(|| {
+                                                    let cname = dialog.chat().name().to_string();
+                                                    if cname.trim().is_empty() { String::new() } else { cname }
+                                                })
+                                        };
+                                        loaded_msgs.push((sender, msg.text().to_string(), msg.outgoing()));
+                                        fetched += 1;
+                                    }
+                                    // Reverse to oldest-first and send via channel
+                                    loaded_msgs.reverse();
+                                    let _ = loader_tx.send((chat_id, loaded_msgs));
                                     break;
                                 }
-                                let sender = if msg.outgoing() {
-                                    "You".to_string()
-                                } else {
-                                    msg.sender()
-                                        .map(|s| {
-                                            let name = s.name().to_string();
-                                            if name.trim().is_empty() {
-                                                let cname = dialog.chat().name().to_string();
-                                                if cname.trim().is_empty() { String::new() } else { cname }
-                                            } else {
-                                                name
-                                            }
-                                        })
-                                        .unwrap_or_else(|| {
-                                            let cname = dialog.chat().name().to_string();
-                                            if cname.trim().is_empty() { String::new() } else { cname }
-                                        })
-                                };
-                                app.add_message(
-                                    chat_id,
-                                    sender,
-                                    msg.text().to_string(),
-                                    msg.outgoing(),
-                                );
-                                fetched += 1;
                             }
-
-                            // Reverse messages to show oldest first
-                            if let Some(msgs) = app.messages.get_mut(&chat_id) {
-                                msgs.reverse();
-                            }
-                            break;
-                        }
+                        });
                     }
+                } else {
+                    // Already have messages, just clear loading status
                     app.loading_status = None;
+                    app.pending_load = None;
                 }
             }
         }
@@ -371,6 +380,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         app.add_message(chat.id(), sender_name, msg.text().to_string(), false);
                     }
                 }
+            }
+
+            // Handle loaded messages from background task
+            Some((chat_id, messages)) = msg_rx.recv() => {
+                // Only apply if this is still the chat we're waiting for (debounce)
+                if app.pending_load == Some(chat_id) {
+                    for (sender, text, outgoing) in messages {
+                        app.add_message(chat_id, sender, text, outgoing);
+                    }
+                    app.loading_status = None;
+                    app.pending_load = None;
+                }
+                // If user navigated away, just ignore the loaded messages
             }
         }
     }
