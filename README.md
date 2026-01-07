@@ -6,6 +6,14 @@ Vimgram fills the gap between heavy GUI clients and limited CLI tools. It brings
 
 ---
 
+# Demo
+
+
+
+https://github.com/user-attachments/assets/2558c324-24fe-4c79-814c-6fbabb741f04
+
+
+
 <img width="2560" height="1439" alt="Vimgram Screenshot" src="https://github.com/user-attachments/assets/7429db5e-c01a-47bf-ac97-e8f2fbdf6244" />
 
 ## ✨ Features
