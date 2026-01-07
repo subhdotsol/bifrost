@@ -265,7 +265,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if !msg.outgoing() {
                         let chat = msg.chat();
                         // Get sender name - fallback to chat name for private chats
-                        let sender = msg.sender()
+                        // Get sender name - fallback to chat name for private chats
+                        let mut sender_name = msg.sender()
                             .map(|s| {
                                 let name = s.name().to_string();
                                 if name.trim().is_empty() { 
@@ -277,8 +278,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let cname = chat.name().to_string();
                                 if cname.trim().is_empty() { "Unknown".to_string() } else { cname }
                             });
+
+                        // If sender is still Unknown, try to refresh via dialogs
+                        if sender_name == "Unknown" {
+                            // Fetch the latest dialog (which should be this new message)
+                            // This also naturally updates the cache
+                            let mut dialogs = tg.client.iter_dialogs();
+                            if let Ok(Some(dialog)) = dialogs.next().await {
+                                if dialog.chat().id() == chat.id() {
+                                    let name = dialog.chat().name().to_string();
+                                    if !name.trim().is_empty() {
+                                        sender_name = name;
+                                    }
+                                }
+                            }
+                        }
+
                         app.add_chat(chat.id(), chat.name().to_string());
-                        app.add_message(chat.id(), sender, msg.text().to_string(), false);
+                        app.add_message(chat.id(), sender_name, msg.text().to_string(), false);
                     }
                 }
             }

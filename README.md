@@ -57,6 +57,17 @@ cargo run --release
 
 ---
 
+## 🛡 Security & Privacy
+
+We take your privacy seriously. Vimgram is designed with a "trust no one" architecture:
+
+- **Open Source**: The entire codebase is open and transparent. You can inspect exactly how your data is handled.
+- **Local Storage**: Your `session.dat` and API credentials are stored **locally** on your machine (in your OS-standard configuration directory). They are **never** sent to us or any third-party server.
+- **Direct Connection**: Vimgram facilitates a direct connection between your machine and Telegram's official MTProto servers. There is no middleman backend.
+- **Your Keys, Your Control**: We ask for your own API ID/Hash so that you are in full control of your session and not subject to shared rate limits.
+
+---
+
 ## 🎮 Keybindings
 
 Vimgram is modal, just like Vim.
