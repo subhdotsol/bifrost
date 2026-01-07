@@ -22,6 +22,16 @@ Vimgram fills the gap between heavy GUI clients and limited CLI tools. It brings
 
 ---
 
+## 📋 Prerequisites
+
+Before installing, you'll need a Telegram **API ID** and **API Hash**:
+1. Log in to your Telegram account at [my.telegram.org/apps](https://my.telegram.org/apps).
+2. Go to **API development tools**.
+3. Create a new application (the details don't matter much).
+4. Copy your **App api_id** and **App api_hash**.
+
+---
+
 ## 🛠 Installation
 
 ### Option 1: Install via Cargo (Recommended)
@@ -37,7 +47,7 @@ vimgram
 ### Option 2: Build from Source
 **Prerequisites**
 - **Rust** (latest stable)
-- A Telegram **API ID** and **API Hash** (get them from [my.telegram.org](https://my.telegram.org))
+- Your **API ID** and **API Hash** (see above)
 
 ### 1. Clone & Config
 ```bash
