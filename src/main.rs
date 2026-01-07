@@ -4,6 +4,8 @@ mod ui;
 
 use std::io;
 use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crossterm::{
     event::{self, Event},
@@ -125,6 +127,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load dialogs (just chat names, no messages for faster loading)
     // Limit to 100 chats to prevent overload
+    // Also cache the grammers Chat objects for O(1) lookup later
+    let mut chat_cache: HashMap<i64, grammers_client::types::Chat> = HashMap::new();
     let mut dialogs = tg.client.iter_dialogs();
     let mut count = 0;
     const MAX_CHATS: usize = 100;
@@ -133,9 +137,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
         let chat = dialog.chat();
+        chat_cache.insert(chat.id(), chat.clone());
         app.add_chat(chat.id(), chat.name().to_string());
         count += 1;
     }
+    // Wrap in Arc for sharing with async tasks
+    let chat_cache = Arc::new(chat_cache);
 
     app.loading_status = None;
     // Let lazy loading handle message fetching for the first chat too
@@ -238,47 +245,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         app.loading_status = Some("Loading...".to_string());
                         app.pending_load = Some(chat_id);
                         
-                        // Spawn background loader (non-blocking!)
+                        // Spawn background loader using cached chat (O(1) lookup!)
                         let client = tg.client.clone();
                         let loader_tx = msg_tx.clone();
+                        let cache = chat_cache.clone();
                         tokio::spawn(async move {
-                            // Find the dialog for this chat
-                            let mut dialogs = client.iter_dialogs();
-                            while let Ok(Some(dialog)) = dialogs.next().await {
-                                if dialog.chat().id() == chat_id {
-                                    let mut messages_iter = client.iter_messages(dialog.chat());
-                                    let mut loaded_msgs: Vec<(String, String, bool)> = Vec::new();
-                                    let mut fetched = 0;
-                                    while let Ok(Some(msg)) = messages_iter.next().await {
-                                        if fetched >= 50 {
-                                            break;
-                                        }
-                                        let sender = if msg.outgoing() {
-                                            "You".to_string()
-                                        } else {
-                                            msg.sender()
-                                                .map(|s| {
-                                                    let name = s.name().to_string();
-                                                    if name.trim().is_empty() {
-                                                        let cname = dialog.chat().name().to_string();
-                                                        if cname.trim().is_empty() { String::new() } else { cname }
-                                                    } else {
-                                                        name
-                                                    }
-                                                })
-                                                .unwrap_or_else(|| {
-                                                    let cname = dialog.chat().name().to_string();
-                                                    if cname.trim().is_empty() { String::new() } else { cname }
-                                                })
-                                        };
-                                        loaded_msgs.push((sender, msg.text().to_string(), msg.outgoing()));
-                                        fetched += 1;
+                            // Use cached chat directly - no dialog iteration!
+                            if let Some(cached_chat) = cache.get(&chat_id) {
+                                let chat_name = cached_chat.name().to_string();
+                                let mut messages_iter = client.iter_messages(cached_chat);
+                                let mut loaded_msgs: Vec<(String, String, bool)> = Vec::new();
+                                let mut fetched = 0;
+                                while let Ok(Some(msg)) = messages_iter.next().await {
+                                    if fetched >= 50 {
+                                        break;
                                     }
-                                    // Reverse to oldest-first and send via channel
-                                    loaded_msgs.reverse();
-                                    let _ = loader_tx.send((chat_id, loaded_msgs));
-                                    break;
+                                    let sender = if msg.outgoing() {
+                                        "You".to_string()
+                                    } else {
+                                        msg.sender()
+                                            .map(|s| {
+                                                let name = s.name().to_string();
+                                                if name.trim().is_empty() {
+                                                    if chat_name.trim().is_empty() { String::new() } else { chat_name.clone() }
+                                                } else {
+                                                    name
+                                                }
+                                            })
+                                            .unwrap_or_else(|| {
+                                                if chat_name.trim().is_empty() { String::new() } else { chat_name.clone() }
+                                            })
+                                    };
+                                    loaded_msgs.push((sender, msg.text().to_string(), msg.outgoing()));
+                                    fetched += 1;
                                 }
+                                // Reverse to oldest-first and send via channel
+                                loaded_msgs.reverse();
+                                let _ = loader_tx.send((chat_id, loaded_msgs));
                             }
                         });
                     }
@@ -296,25 +299,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match maybe_event {
                     Some(Ok(Event::Key(key))) => {
                          if let Some(message_to_send) = handle_key(&mut app, key) {
-                            // Send message to current chat
+                            // Send message to current chat using cached chat (O(1) lookup!)
                             if let Some(chat_id) = app.current_chat_id() {
-                                if let Some(chat) = app.chats.iter().find(|c| c.id == chat_id) {
-                                    // Find the actual chat to send to
-                                    let mut dialogs = tg.client.iter_dialogs();
-                                    while let Some(dialog) = dialogs.next().await? {
-                                        if dialog.chat().id() == chat_id {
-                                            tg.client
-                                                .send_message(dialog.chat(), message_to_send.clone())
-                                                .await?;
-                                            app.add_message(
-                                                chat_id,
-                                                "You".to_string(),
-                                                message_to_send,
-                                                true,
-                                            );
-                                            break;
-                                        }
-                                    }
+                                if let Some(cached_chat) = chat_cache.get(&chat_id) {
+                                    tg.client
+                                        .send_message(cached_chat, message_to_send.clone())
+                                        .await?;
+                                    app.add_message(
+                                        chat_id,
+                                        "You".to_string(),
+                                        message_to_send,
+                                        true,
+                                    );
                                 }
                             }
                         }
