@@ -95,8 +95,17 @@ Vimgram is modal, just like Vim.
 |:---:|---|
 | `j` / `k` | Scroll history **down** (newer) / **up** (older) |
 | `h` / `l` | Switch focus between **Friends List** and **Chat** |
+| `/` | Enter **SEARCH** mode (filter friends list) |
 | `i` | Enter **INSERT** mode (start typing) |
 | `q` | Quit Vimgram |
+
+### **SEARCH Mode**
+| Key | Action |
+|:---:|---|
+| `Type` | Filter friends by name |
+| `↑` / `↓` | Navigate filtered results |
+| `Enter` | **Jump** to selected chat |
+| `Esc` | Cancel search, return to **NORMAL** |
 
 ### **INSERT Mode**
 | Key | Action |

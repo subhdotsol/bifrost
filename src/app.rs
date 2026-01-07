@@ -5,6 +5,7 @@ use std::collections::HashMap;
 pub enum Mode {
     Normal,
     Insert,
+    Search,
 }
 
 /// Which panel is focused
@@ -45,6 +46,10 @@ pub struct App {
     pub reload_requested: bool,
     pub loading_status: Option<String>,
     pub needs_message_load: bool,
+    // Search mode state
+    pub search_input: String,
+    pub filtered_chat_indices: Vec<usize>,
+    pub search_selected: usize,
 }
 
 impl App {
@@ -62,6 +67,10 @@ impl App {
             reload_requested: false,
             loading_status: None,
             needs_message_load: true,
+            // Search mode state
+            search_input: String::new(),
+            filtered_chat_indices: Vec::new(),
+            search_selected: 0,
         }
     }
 
@@ -163,6 +172,68 @@ impl App {
             if !outgoing {
                 chat.unread += 1;
             }
+        }
+    }
+
+    /// Enter search mode
+    pub fn enter_search(&mut self) {
+        self.mode = Mode::Search;
+        self.search_input.clear();
+        self.search_selected = 0;
+        self.update_search_filter();
+    }
+
+    /// Exit search mode without jumping
+    pub fn exit_search(&mut self) {
+        self.mode = Mode::Normal;
+        self.search_input.clear();
+        self.filtered_chat_indices.clear();
+    }
+
+    /// Update filtered chat indices based on search input
+    pub fn update_search_filter(&mut self) {
+        let query = self.search_input.to_lowercase();
+        self.filtered_chat_indices = self.chats
+            .iter()
+            .enumerate()
+            .filter(|(_, chat)| {
+                if query.is_empty() {
+                    true // Show all when empty
+                } else {
+                    chat.name.to_lowercase().contains(&query)
+                }
+            })
+            .map(|(i, _)| i)
+            .collect();
+        
+        // Reset selection if it's out of bounds
+        if self.search_selected >= self.filtered_chat_indices.len() {
+            self.search_selected = 0;
+        }
+    }
+
+    /// Jump to the selected search result
+    pub fn jump_to_selected_search_result(&mut self) {
+        if let Some(&chat_index) = self.filtered_chat_indices.get(self.search_selected) {
+            self.selected_chat = chat_index;
+            self.scroll_offset = 0;
+            self.needs_message_load = true;
+            self.clear_current_unread();
+        }
+        self.exit_search();
+    }
+
+    /// Move selection up in search results
+    pub fn search_move_up(&mut self) {
+        if self.search_selected > 0 {
+            self.search_selected -= 1;
+        }
+    }
+
+    /// Move selection down in search results
+    pub fn search_move_down(&mut self) {
+        if self.search_selected < self.filtered_chat_indices.len().saturating_sub(1) {
+            self.search_selected += 1;
         }
     }
 }

@@ -103,42 +103,62 @@ pub fn draw(frame: &mut Frame, app: &App) {
 /// Draw the friends/contacts list panel
 fn draw_friends_panel(frame: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.panel == Panel::Friends;
-    let border_color = if is_focused {
+    let is_search_mode = app.mode == Mode::Search;
+    
+    let border_color = if is_search_mode {
+        Color::Rgb(255, 180, 50) // Orange/yellow when in search mode
+    } else if is_focused {
         Color::Rgb(70, 130, 180) // Bright blue when focused
     } else {
         Color::Rgb(50, 50, 60) // Dim when not focused
     };
 
-    let items: Vec<ListItem> = app
-        .chats
+    // Determine which chats to display
+    let (display_indices, highlight_idx): (Vec<usize>, usize) = if is_search_mode {
+        (app.filtered_chat_indices.clone(), app.search_selected)
+    } else {
+        ((0..app.chats.len()).collect(), app.selected_chat)
+    };
+
+    let items: Vec<ListItem> = display_indices
         .iter()
         .enumerate()
-        .map(|(i, chat)| {
-            let style = if i == app.selected_chat && is_focused {
-                Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Rgb(180, 180, 180))
-            };
+        .filter_map(|(display_idx, &chat_idx)| {
+            app.chats.get(chat_idx).map(|chat| {
+                let is_selected = display_idx == highlight_idx;
+                let style = if is_selected && (is_focused || is_search_mode) {
+                    Style::default()
+                        .fg(if is_search_mode { Color::Rgb(255, 180, 50) } else { Color::Rgb(70, 130, 180) })
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(180, 180, 180))
+                };
 
-            let prefix = if i == app.selected_chat && is_focused { "> " } else { "  " };
-            let unread = if chat.unread > 0 {
-                format!(" ({})", chat.unread)
-            } else {
-                String::new()
-            };
+                let prefix = if is_selected && (is_focused || is_search_mode) { "> " } else { "  " };
+                let unread = if chat.unread > 0 {
+                    format!(" ({})", chat.unread)
+                } else {
+                    String::new()
+                };
 
-            ListItem::new(format!("{}{}{}", prefix, chat.name, unread)).style(style)
+                ListItem::new(format!("{}{}{}", prefix, chat.name, unread)).style(style)
+            })
         })
         .collect();
+
+    // Build title with search input if in search mode
+    let title = if is_search_mode {
+        format!(" /{}▏", app.search_input)
+    } else {
+        " friends ".to_string()
+    };
 
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color))
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .title(" friends "),
+            .title(title),
     );
 
     frame.render_widget(list, area);
@@ -312,6 +332,10 @@ fn draw_input_box(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Insert => (
             " INSERT ",
             Style::default().fg(Color::Rgb(70, 130, 180)),
+        ),
+        Mode::Search => (
+            " / search (↑↓ navigate, Enter select, Esc cancel) ",
+            Style::default().fg(Color::Rgb(255, 180, 50)),
         ),
         Mode::Normal => (
             " type to send ",

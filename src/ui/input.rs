@@ -12,6 +12,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<String> {
     match app.mode {
         Mode::Normal => handle_normal_mode(app, key),
         Mode::Insert => handle_insert_mode(app, key),
+        Mode::Search => handle_search_mode(app, key),
     }
 }
 
@@ -26,6 +27,9 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         
         // Mode switching
         KeyCode::Char('i') => app.enter_insert(),
+        
+        // Search mode
+        KeyCode::Char('/') => app.enter_search(),
         
         // Reload current chat
         KeyCode::Char('r') => app.reload_requested = true,
@@ -69,6 +73,51 @@ fn handle_insert_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         // Type character
         KeyCode::Char(c) => {
             app.input.push(c);
+        }
+        
+        _ => {}
+    }
+    None
+}
+
+/// Handle keys in search mode (filter friends list)
+fn handle_search_mode(app: &mut App, key: KeyEvent) -> Option<String> {
+    match key.code {
+        // Exit search mode
+        KeyCode::Esc => {
+            app.exit_search();
+        }
+        
+        // Jump to selected chat
+        KeyCode::Enter => {
+            app.jump_to_selected_search_result();
+        }
+        
+        // Navigate filtered results
+        KeyCode::Down | KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_move_down();
+        }
+        KeyCode::Up | KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_move_up();
+        }
+        // Also allow plain arrows for navigation
+        KeyCode::Down => {
+            app.search_move_down();
+        }
+        KeyCode::Up => {
+            app.search_move_up();
+        }
+        
+        // Delete character
+        KeyCode::Backspace => {
+            app.search_input.pop();
+            app.update_search_filter();
+        }
+        
+        // Type character to filter
+        KeyCode::Char(c) => {
+            app.search_input.push(c);
+            app.update_search_filter();
         }
         
         _ => {}
