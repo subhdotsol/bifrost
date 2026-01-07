@@ -281,14 +281,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         // If sender is still Unknown, try to refresh via dialogs
                         if sender_name == "Unknown" {
-                            // Fetch the latest dialog (which should be this new message)
-                            // This also naturally updates the cache
-                            let mut dialogs = tg.client.iter_dialogs();
-                            if let Ok(Some(dialog)) = dialogs.next().await {
-                                if dialog.chat().id() == chat.id() {
-                                    let name = dialog.chat().name().to_string();
-                                    if !name.trim().is_empty() {
-                                        sender_name = name;
+                            // If it's a DM (positive ID), the chat name IS the sender name.
+                            // Trust the chat name over "Unknown"
+                            if chat.id() > 0 && !chat.name().trim().is_empty() {
+                                sender_name = chat.name().to_string();
+                            } else {
+                                // Fetch the latest dialog (which should be this new message)
+                                // This also naturally updates the cache
+                                let mut dialogs = tg.client.iter_dialogs();
+                                if let Ok(Some(dialog)) = dialogs.next().await {
+                                    if dialog.chat().id() == chat.id() {
+                                        let name = dialog.chat().name().to_string();
+                                        if !name.trim().is_empty() {
+                                            sender_name = name;
+                                        }
                                     }
                                 }
                             }

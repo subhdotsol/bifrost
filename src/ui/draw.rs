@@ -206,15 +206,30 @@ fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
             
             // First line: sender + text
             if let Some(first_line) = wrapped_lines.first() {
-                // Pad sender name to avoid artifacts (ghosting) when refreshing from "Unknown"
-                // "Unknown" is 7 chars. If we replace it with "Zuxy ❤️" (6 w/ spaces), 
-                // the last 'n' might remain if not cleared properly.
-                // We pad with an extra space to ensure we wipe previous text.
-                items.push(ListItem::new(Line::from(vec![
-                    Span::styled(format!(" {} ", sender_display), sender_style),
-                    Span::raw(": "), // Separate colon, not styled
-                    Span::styled(first_line.clone(), text_style),
-                ])));
+                // Heuristic: If sender name matches the Chat Title (and it's not empty),
+                // it's likely a DM where the header already says who it is.
+                // In that case, we can HIDE the sender name for a cleaner UI (and zero artifacts).
+                let mut current_chat_name = "Unknown";
+                if let Some(c) = app.chats.get(app.selected_chat) {
+                    current_chat_name = &c.name;
+                }
+
+                if sender_display == current_chat_name && current_chat_name != "Unknown" {
+                    // Hide sender name, just show text (padded to align with other lines if desirable, 
+                    // or just flush left. Standard TUI chat usually aligns flush left if no name).
+                    items.push(ListItem::new(Line::from(vec![
+                        Span::styled(first_line.clone(), text_style),
+                    ])));
+                } else {
+                    // Show sender name
+                    // Pad aggressively to 20 chars to wipe any "Unknown" ghosting or artifacts
+                    // format!("{:<20}", s) pads right with spaces to length 20.
+                    items.push(ListItem::new(Line::from(vec![
+                        Span::styled(format!("{:<20}", sender_display), sender_style),
+                        Span::raw(": "), 
+                        Span::styled(first_line.clone(), text_style),
+                    ])));
+                }
             }
             
             // Continuation lines with indent
