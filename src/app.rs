@@ -50,6 +50,8 @@ pub struct App {
     pub search_input: String,
     pub filtered_chat_indices: Vec<usize>,
     pub search_selected: usize,
+    // Disconnect request
+    pub disconnect_requested: bool,
 }
 
 impl App {
@@ -71,6 +73,8 @@ impl App {
             search_input: String::new(),
             filtered_chat_indices: Vec::new(),
             search_selected: 0,
+            // Disconnect
+            disconnect_requested: false,
         }
     }
 

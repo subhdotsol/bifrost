@@ -37,6 +37,9 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         // Quit
         KeyCode::Char('q') => app.should_quit = true,
         
+        // Disconnect (delete session and quit)
+        KeyCode::Char('D') => app.disconnect_requested = true,
+        
         // Jump to top/bottom
         KeyCode::Char('g') => app.selected_chat = 0,
         KeyCode::Char('G') => {

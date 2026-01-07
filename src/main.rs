@@ -18,7 +18,7 @@ use crossterm::event::EventStream;
 
 use app::App;
 use telegram::auth::{authenticate, prompt_for_credentials};
-use telegram::client::TelegramClient;
+use telegram::client::{TelegramClient, delete_session};
 use ui::draw::draw;
 use ui::input::handle_key;
 
@@ -86,14 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     app.loading_status = Some("Loading chats...".to_string());
 
-    // Add welcome chat
+    // Add welcome chat (the keybindings box is rendered by draw_welcome_box in draw.rs)
     app.add_chat(1, "Welcome".to_string());
-    app.add_message(
-        1,
-        "Bifrost".to_string(),
-        "Welcome to Bifrost! Use hjkl to navigate, i to type, Enter to send.".to_string(),
-        false,
-    );
 
     // Load dialogs (just chat names, no messages for faster loading)
     // Limit to 100 chats to prevent overload
@@ -281,7 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        if app.should_quit {
+                        if app.should_quit || app.disconnect_requested {
                             break;
                         }
                     }
@@ -352,6 +346,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    println!("👋 Goodbye!");
+    // Handle disconnect request
+    if app.disconnect_requested {
+        match delete_session() {
+            Ok(true) => println!("🔌 Session deleted. Run vimgram again to log in with a new account."),
+            Ok(false) => println!("⚠️ No session file found."),
+            Err(e) => println!("❌ Failed to delete session: {}", e),
+        }
+    } else {
+        println!("👋 Goodbye!");
+    }
     Ok(())
 }

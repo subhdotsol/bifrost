@@ -167,6 +167,7 @@ fn draw_friends_panel(frame: &mut Frame, app: &App, area: Rect) {
 /// Draw the messages/chats panel
 fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
     use ratatui::text::{Line, Span};
+    use ratatui::layout::Alignment;
     
     let is_focused = app.panel == Panel::Chats;
     let border_color = if is_focused {
@@ -174,6 +175,15 @@ fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Color::Rgb(50, 50, 60)
     };
+
+    // Check if this is the Welcome chat (id=1) - show centered welcome box
+    let is_welcome_chat = app.current_chat_id() == Some(1);
+    
+    if is_welcome_chat {
+        // Draw centered welcome box
+        draw_welcome_box(frame, area, border_color);
+        return;
+    }
 
     // Max bubble width = 60% of panel width
     let panel_width = area.width.saturating_sub(4) as usize;
@@ -324,6 +334,79 @@ fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     frame.render_widget(list, area);
+}
+
+/// Draw a centered welcome box with keybindings
+fn draw_welcome_box(frame: &mut Frame, area: Rect, border_color: Color) {
+    use ratatui::text::{Line, Span};
+    use ratatui::layout::Alignment;
+    
+    // Outer block for the chat panel
+    let outer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Welcome ");
+    
+    let inner_area = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
+    
+    // Don't render inner box if area is too small
+    if inner_area.width < 20 || inner_area.height < 10 {
+        // Just show a simple message in the center
+        let simple_msg = Paragraph::new("Press j/k to navigate, / to search")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Rgb(180, 180, 180)));
+        frame.render_widget(simple_msg, inner_area);
+        return;
+    }
+    
+    // Calculate centered box dimensions - ensure minimum viable size
+    let content_width = 50;
+    let content_height = 15;  // 12 lines + 2 for borders + 1 buffer
+    
+    let box_width = content_width.min(inner_area.width.saturating_sub(2));
+    let box_height = content_height.min(inner_area.height.saturating_sub(2));
+    
+    // Ensure we don't underflow
+    if box_width < 10 || box_height < 5 {
+        return;
+    }
+    
+    let box_x = inner_area.x + (inner_area.width.saturating_sub(box_width)) / 2;
+    let box_y = inner_area.y + (inner_area.height.saturating_sub(box_height)) / 2;
+    
+    let welcome_area = Rect::new(box_x, box_y, box_width, box_height);
+    
+    // Welcome content
+    let welcome_lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "⚡ Welcome to Vimgram! ⚡",
+            Style::default().fg(Color::Rgb(100, 180, 255)).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled("NORMAL MODE", Style::default().fg(Color::Rgb(255, 180, 50)).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("j/k scroll  h/l panels  / search", Style::default().fg(Color::Rgb(180, 180, 180)))),
+        Line::from(Span::styled("i insert  q quit  D disconnect", Style::default().fg(Color::Rgb(180, 180, 180)))),
+        Line::from(""),
+        Line::from(Span::styled("SEARCH MODE", Style::default().fg(Color::Rgb(255, 180, 50)).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("type filter  arrows nav  Enter jump", Style::default().fg(Color::Rgb(180, 180, 180)))),
+        Line::from(""),
+        Line::from(Span::styled("INSERT MODE", Style::default().fg(Color::Rgb(255, 180, 50)).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("type msg  Enter send  Esc cancel", Style::default().fg(Color::Rgb(180, 180, 180)))),
+    ];
+    
+    let welcome_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(70, 130, 180)))
+        .border_type(ratatui::widgets::BorderType::Rounded);
+    
+    let paragraph = Paragraph::new(welcome_lines)
+        .block(welcome_block)
+        .alignment(Alignment::Center);
+    
+    frame.render_widget(paragraph, welcome_area);
 }
 
 /// Draw the input box at the bottom

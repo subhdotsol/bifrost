@@ -90,3 +90,25 @@ impl TelegramClient {
         Ok(self.client.is_authorized().await?)
     }
 }
+
+/// Delete the session file to force re-authentication
+pub fn delete_session() -> Result<bool, Box<dyn std::error::Error>> {
+    let session_path = get_session_path();
+    if session_path.exists() {
+        fs::remove_file(&session_path)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// Delete credentials file
+pub fn delete_credentials() -> Result<bool, Box<dyn std::error::Error>> {
+    let creds_path = get_credentials_path();
+    if creds_path.exists() {
+        fs::remove_file(&creds_path)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
