@@ -206,8 +206,12 @@ fn draw_chats_panel(frame: &mut Frame, app: &App, area: Rect) {
             
             // First line: sender + text
             if let Some(first_line) = wrapped_lines.first() {
+                // Pad sender name to avoid artifacts (ghosting) when refreshing from "Unknown"
+                // "Unknown" is 7 chars. If we replace it with "Zuxy ❤️" (6 w/ spaces), 
+                // the last 'n' might remain if not cleared properly.
+                // We pad with an extra space to ensure we wipe previous text.
                 items.push(ListItem::new(Line::from(vec![
-                    Span::styled(format!(" {}", sender_display), sender_style),
+                    Span::styled(format!(" {} ", sender_display), sender_style),
                     Span::raw(": "), // Separate colon, not styled
                     Span::styled(first_line.clone(), text_style),
                 ])));
