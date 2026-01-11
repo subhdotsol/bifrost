@@ -7,8 +7,10 @@ pub enum Mode {
     Insert,
     Search,
     AccountPicker,
-    Command,  // For : commands
-    FindUser, // For :find username
+    Command,   // For : commands
+    FindUser,  // For :find username
+    AICommand, // For :ai natural language commands
+    Code,      // For :code coding assistant
 }
 
 /// Which panel is focused
@@ -69,6 +71,22 @@ pub struct App {
     pub find_input: String,
     pub find_result: Option<FindResult>,
     pub find_requested: Option<String>, // Username to resolve
+    // AI state
+    pub ai_input: String,
+    pub ai_output: Option<String>,
+    pub ai_status: Option<String>,
+    pub ai_request: Option<AIRequest>,
+    pub code_input: String,
+    pub code_output: String,
+    pub code_scroll: usize,
+}
+
+/// AI request types
+#[derive(Debug, Clone)]
+pub enum AIRequest {
+    Command(String),       // Natural language command to parse
+    Reply(Option<String>), // Generate reply with optional tone
+    Code(String),          // Code assistance query
 }
 
 /// Result of a global user search
@@ -115,6 +133,14 @@ impl App {
             find_input: String::new(),
             find_result: None,
             find_requested: None,
+            // AI state
+            ai_input: String::new(),
+            ai_output: None,
+            ai_status: None,
+            ai_request: None,
+            code_input: String::new(),
+            code_output: String::new(),
+            code_scroll: 0,
         }
     }
 
@@ -363,8 +389,10 @@ impl App {
 
     /// Execute the current command
     pub fn execute_command(&mut self) {
-        let cmd = self.command_input.trim().to_lowercase();
-        if cmd.starts_with("find ") || cmd.starts_with("f ") {
+        let cmd = self.command_input.trim();
+        let cmd_lower = cmd.to_lowercase();
+
+        if cmd_lower.starts_with("find ") || cmd_lower.starts_with("f ") {
             // Extract username (strip leading @ if present)
             let username = cmd
                 .split_whitespace()
@@ -377,7 +405,36 @@ impl App {
                 self.find_requested = Some(username.to_string());
                 self.mode = Mode::FindUser;
             }
-        } else if cmd == "q" || cmd == "quit" {
+        } else if cmd_lower.starts_with("ai ") {
+            // Enter AI command mode with the command text
+            let ai_cmd = cmd
+                .strip_prefix("ai ")
+                .or_else(|| cmd.strip_prefix("AI "))
+                .unwrap_or("");
+            self.ai_input = ai_cmd.to_string();
+            self.mode = Mode::AICommand;
+            if !ai_cmd.is_empty() {
+                // Auto-submit if command provided
+                self.submit_ai_command();
+            }
+        } else if cmd_lower == "ai" {
+            // Enter AI command mode empty
+            self.enter_ai_command();
+        } else if cmd_lower.starts_with("code ") {
+            // Enter code mode with query
+            let query = cmd
+                .strip_prefix("code ")
+                .or_else(|| cmd.strip_prefix("CODE "))
+                .unwrap_or("");
+            self.code_input = query.to_string();
+            self.mode = Mode::Code;
+            if !query.is_empty() {
+                self.submit_code_query();
+            }
+        } else if cmd_lower == "code" {
+            // Enter code mode empty
+            self.enter_code_mode();
+        } else if cmd_lower == "q" || cmd_lower == "quit" {
             self.should_quit = true;
         }
         // Clear command input after execution
@@ -411,5 +468,97 @@ impl App {
             }
         }
         self.exit_find();
+    }
+
+    // ==================== AI Mode Methods ====================
+
+    /// Enter AI command mode
+    pub fn enter_ai_command(&mut self) {
+        self.mode = Mode::AICommand;
+        self.ai_input.clear();
+        self.ai_output = None;
+        self.ai_status = Some("Enter command...".to_string());
+    }
+
+    /// Exit AI command mode
+    pub fn exit_ai_command(&mut self) {
+        self.mode = Mode::Normal;
+        self.ai_input.clear();
+        self.ai_output = None;
+        self.ai_status = None;
+        self.ai_request = None;
+    }
+
+    /// Submit AI command for processing
+    pub fn submit_ai_command(&mut self) {
+        if !self.ai_input.is_empty() {
+            self.ai_request = Some(AIRequest::Command(self.ai_input.clone()));
+            self.ai_status = Some("🤔 Thinking...".to_string());
+        }
+    }
+
+    /// Set AI output after processing
+    pub fn set_ai_output(&mut self, output: String) {
+        self.ai_output = Some(output);
+        self.ai_status = None;
+    }
+
+    /// Set AI error
+    pub fn set_ai_error(&mut self, error: String) {
+        self.ai_output = Some(format!("❌ {}", error));
+        self.ai_status = None;
+    }
+
+    /// Request smart reply generation
+    pub fn request_smart_reply(&mut self, tone: Option<String>) {
+        self.ai_request = Some(AIRequest::Reply(tone));
+        self.ai_status = Some("✍️ Generating reply...".to_string());
+    }
+
+    /// Enter code assistant mode
+    pub fn enter_code_mode(&mut self) {
+        self.mode = Mode::Code;
+        self.code_input.clear();
+        self.code_output.clear();
+        self.code_scroll = 0;
+    }
+
+    /// Exit code mode
+    pub fn exit_code_mode(&mut self) {
+        self.mode = Mode::Normal;
+        self.code_input.clear();
+        self.code_output.clear();
+        self.code_scroll = 0;
+    }
+
+    /// Submit code query
+    pub fn submit_code_query(&mut self) {
+        if !self.code_input.is_empty() {
+            self.ai_request = Some(AIRequest::Code(self.code_input.clone()));
+            self.ai_status = Some("💻 Processing...".to_string());
+        }
+    }
+
+    /// Set code output
+    pub fn set_code_output(&mut self, output: String) {
+        self.code_output = output;
+        self.ai_status = None;
+    }
+
+    /// Get chat context for smart reply (last N messages)
+    pub fn get_chat_context(&self, max_messages: usize) -> String {
+        let messages = self.current_messages();
+        let start = messages.len().saturating_sub(max_messages);
+        messages[start..]
+            .iter()
+            .map(|m| {
+                if m.outgoing {
+                    format!("You: {}", m.text)
+                } else {
+                    format!("{}: {}", m.sender, m.text)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

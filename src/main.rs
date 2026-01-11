@@ -1,28 +1,29 @@
+mod ai;
 mod app;
 mod telegram;
 mod ui;
 
-use std::io;
-use std::time::Duration;
 use std::collections::HashMap;
+use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
+use crossterm::event::EventStream;
 use crossterm::{
     event::{self, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use futures::{FutureExt, StreamExt};
 use grammers_client::Update;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use futures::{FutureExt, StreamExt};
 use tokio::sync::mpsc;
-use crossterm::event::EventStream;
 
 use app::{App, FindResult};
-use telegram::auth::{authenticate, prompt_for_credentials};
-use telegram::client::{TelegramClient, delete_session};
 use telegram::accounts::AccountRegistry;
+use telegram::auth::{authenticate, prompt_for_credentials};
+use telegram::client::{delete_session, TelegramClient};
 use ui::draw::draw;
 use ui::input::handle_key;
 
@@ -58,9 +59,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("║         ViMGRAM v0.2.0            ║");
                 println!("╚═══════════════════════════════════╝");
                 let (id, hash) = prompt_for_credentials();
-                
+
                 // Save for next time
-                let creds = Credentials { api_id: id, api_hash: hash.clone() };
+                let creds = Credentials {
+                    api_id: id,
+                    api_hash: hash.clone(),
+                };
                 if let Err(e) = creds.save() {
                     eprintln!("Warning: Failed to save credentials: {}", e);
                 }
@@ -81,15 +85,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !tg.is_authorized().await? {
         authenticate(&tg.client).await?;
         tg.save_session()?;
-        
+
         // Update the current account's info in registry
         let me = tg.client.get_me().await?;
         let phone = me.phone().unwrap_or("Unknown").to_string();
         let name = me.first_name().to_string();
-        
+
         if account_registry.has_accounts() {
             // Update existing account's info
-            if let Some(account) = account_registry.accounts.iter_mut().find(|a| a.id == account_registry.active) {
+            if let Some(account) = account_registry
+                .accounts
+                .iter_mut()
+                .find(|a| a.id == account_registry.active)
+            {
                 account.phone = phone;
                 account.name = name;
             }
@@ -115,9 +123,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create app state
     let mut app = App::new();
     app.loading_status = Some("Loading chats...".to_string());
-    
+
     // Set account info in app state
-    let account_info: Vec<(String, String)> = account_registry.accounts
+    let account_info: Vec<(String, String)> = account_registry
+        .accounts
         .iter()
         .map(|a| (a.id.clone(), format!("{} ({})", a.name, a.phone)))
         .collect();
@@ -176,8 +185,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<LoadedMessages>();
 
     // Create a channel for find user results
-    type FindUserResult = (String, Result<(i64, String, grammers_client::types::Chat), String>);
+    type FindUserResult = (
+        String,
+        Result<(i64, String, grammers_client::types::Chat), String>,
+    );
     let (find_tx, mut find_rx) = mpsc::unbounded_channel::<FindUserResult>();
+
+    // Create AI client and channel for AI results
+    let ai_config = ai::AIConfig::load();
+    let ai_client = Arc::new(ai::AIClient::new(ai_config));
+    type AIResult = Result<String, String>;
+    let (ai_tx, mut ai_rx) = mpsc::unbounded_channel::<AIResult>();
 
     // Main loop
     let mut reader = EventStream::new();
@@ -189,9 +207,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Handle reloading status from previous loop
         if app.reload_requested {
             app.reload_requested = false;
-            // ... (reload logic is handled below in the select loop now via manual calls if needed, 
+            // ... (reload logic is handled below in the select loop now via manual calls if needed,
             // but actually we should keep the reload logic inline or just trigger message fetch)
-             if let Some(chat_id) = app.current_chat_id() {
+            if let Some(chat_id) = app.current_chat_id() {
                 // Find the chat and fetch messages
                 let mut dialogs = tg.client.iter_dialogs();
                 while let Some(dialog) = dialogs.next().await? {
@@ -249,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if app.pending_load != Some(chat_id) {
                         app.loading_status = Some("Loading...".to_string());
                         app.pending_load = Some(chat_id);
-                        
+
                         // Spawn background loader using cached chat (O(1) lookup!)
                         let client = tg.client.clone();
                         let loader_tx = msg_tx.clone();
@@ -275,16 +293,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             .map(|s| {
                                                 let name = s.name().to_string();
                                                 if name.trim().is_empty() {
-                                                    if chat_name.trim().is_empty() { String::new() } else { chat_name.clone() }
+                                                    if chat_name.trim().is_empty() {
+                                                        String::new()
+                                                    } else {
+                                                        chat_name.clone()
+                                                    }
                                                 } else {
                                                     name
                                                 }
                                             })
                                             .unwrap_or_else(|| {
-                                                if chat_name.trim().is_empty() { String::new() } else { chat_name.clone() }
+                                                if chat_name.trim().is_empty() {
+                                                    String::new()
+                                                } else {
+                                                    chat_name.clone()
+                                                }
                                             })
                                     };
-                                    loaded_msgs.push((sender, msg.text().to_string(), msg.outgoing()));
+                                    loaded_msgs.push((
+                                        sender,
+                                        msg.text().to_string(),
+                                        msg.outgoing(),
+                                    ));
                                     fetched += 1;
                                 }
                                 // Reverse to oldest-first and send via channel
@@ -314,10 +344,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = find_tx_clone.send((username_clone, Ok((id, name, chat))));
                     }
                     Ok(None) => {
-                        let _ = find_tx_clone.send((username_clone.clone(), Err(format!("User @{} not found", username_clone))));
+                        let _ = find_tx_clone.send((
+                            username_clone.clone(),
+                            Err(format!("User @{} not found", username_clone)),
+                        ));
                     }
                     Err(e) => {
                         let _ = find_tx_clone.send((username_clone, Err(format!("Error: {}", e))));
+                    }
+                }
+            });
+        }
+
+        // Handle AI request
+        if let Some(ai_request) = app.ai_request.take() {
+            let ai_client_clone = ai_client.clone();
+            let ai_tx_clone = ai_tx.clone();
+            use app::AIRequest;
+            tokio::spawn(async move {
+                let result = match ai_request {
+                    AIRequest::Command(cmd) => ai_client_clone.complete(&cmd).await,
+                    AIRequest::Reply(tone) => {
+                        // For now, just return an error - needs chat context
+                        Err(ai::client::AIError::NotConfigured)
+                    }
+                    AIRequest::Code(query) => ai_client_clone.code_assist(&query).await,
+                };
+                match result {
+                    Ok(response) => {
+                        let _ = ai_tx_clone.send(Ok(response));
+                    }
+                    Err(e) => {
+                        let _ = ai_tx_clone.send(Err(e.to_string()));
                     }
                 }
             });
@@ -365,7 +423,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut sender_name = msg.sender()
                             .map(|s| {
                                 let name = s.name().to_string();
-                                if name.trim().is_empty() { 
+                                if name.trim().is_empty() {
                                     let cname = chat.name().to_string();
                                     if cname.trim().is_empty() { String::new() } else { cname }
                                 } else { name }
@@ -380,7 +438,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // If it's a DM (positive ID), the chat name IS the sender name.
                             // Trust the chat name over "Unknown"
                             let mut resolved_name = chat.name().to_string();
-                            
+
                             // If even the chat name from the update is "Unknown", check our local cache
                             if (resolved_name == "Unknown" || resolved_name.trim().is_empty()) && chat.id() > 0 {
                                 if let Some(existing_chat) = app.chats.iter().find(|c| c.id == chat.id()) {
@@ -442,6 +500,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+
+            // Handle AI results
+            Some(result) = ai_rx.recv() => {
+                match result {
+                    Ok(response) => {
+                        // Update appropriate output based on current mode
+                        if app.mode == app::Mode::AICommand {
+                            app.set_ai_output(response);
+                        } else if app.mode == app::Mode::Code {
+                            app.set_code_output(response);
+                        }
+                    }
+                    Err(error) => {
+                        app.set_ai_error(error);
+                    }
+                }
+            }
         }
     }
 
@@ -453,7 +528,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle disconnect request
     if app.disconnect_requested {
         match delete_session() {
-            Ok(true) => println!("🔌 Session deleted. Run vimgram again to log in with a new account."),
+            Ok(true) => {
+                println!("🔌 Session deleted. Run vimgram again to log in with a new account.")
+            }
             Ok(false) => println!("⚠️ No session file found."),
             Err(e) => println!("❌ Failed to delete session: {}", e),
         }
@@ -462,11 +539,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         account_registry.set_active(&account_id);
         let _ = account_registry.save();
         println!("🔄 Switching to account: {}...", account_id);
-        
+
         // Auto-restart by exec'ing ourselves
         let exe = std::env::current_exe().expect("Failed to get current executable");
         let args: Vec<String> = std::env::args().collect();
-        
+
         // Use exec to replace current process (Unix-like systems)
         #[cfg(unix)]
         {
@@ -476,7 +553,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let err = cmd.exec();
             eprintln!("Failed to restart: {}", err);
         }
-        
+
         // On non-Unix, just tell user to restart
         #[cfg(not(unix))]
         {
@@ -492,12 +569,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
         account_registry.set_active(&new_id);
         let _ = account_registry.save();
-        
+
         // Auto-restart for new account authentication
         println!("➕ Adding new account...");
         let exe = std::env::current_exe().expect("Failed to get current executable");
         let args: Vec<String> = std::env::args().collect();
-        
+
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -506,7 +583,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let err = cmd.exec();
             eprintln!("Failed to restart: {}", err);
         }
-        
+
         #[cfg(not(unix))]
         {
             println!("   Run vimgram again to authenticate the new account.");

@@ -1,5 +1,5 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::app::{App, Mode};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Handle keyboard input based on current mode
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<String> {
@@ -16,6 +16,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<String> {
         Mode::AccountPicker => handle_account_picker_mode(app, key),
         Mode::Command => handle_command_mode(app, key),
         Mode::FindUser => handle_find_user_mode(app, key),
+        Mode::AICommand => handle_ai_command_mode(app, key),
+        Mode::Code => handle_code_mode(app, key),
     }
 }
 
@@ -27,34 +29,34 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         KeyCode::Char('k') | KeyCode::Up => app.move_up(),
         KeyCode::Char('h') | KeyCode::Left => app.switch_panel(),
         KeyCode::Char('l') | KeyCode::Right => app.switch_panel(),
-        
+
         // Mode switching
         KeyCode::Char('i') => app.enter_insert(),
-        
+
         // Search mode
         KeyCode::Char('/') => app.enter_search(),
-        
+
         // Reload current chat
         KeyCode::Char('r') => app.reload_requested = true,
-        
+
         // Quit
         KeyCode::Char('q') => app.should_quit = true,
-        
+
         // Disconnect (delete session and quit)
         KeyCode::Char('D') => app.disconnect_requested = true,
-        
+
         // Account picker
         KeyCode::Char('A') => app.enter_account_picker(),
-        
+
         // Command mode
         KeyCode::Char(':') => app.enter_command(),
-        
+
         // Jump to top/bottom
         KeyCode::Char('g') => app.selected_chat = 0,
         KeyCode::Char('G') => {
             app.selected_chat = app.chats.len().saturating_sub(1);
         }
-        
+
         _ => {}
     }
     None
@@ -67,7 +69,7 @@ fn handle_insert_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         KeyCode::Esc => {
             app.exit_insert();
         }
-        
+
         // Send message
         KeyCode::Enter => {
             if !app.input.is_empty() {
@@ -76,17 +78,17 @@ fn handle_insert_mode(app: &mut App, key: KeyEvent) -> Option<String> {
                 return Some(message);
             }
         }
-        
+
         // Delete character
         KeyCode::Backspace => {
             app.input.pop();
         }
-        
+
         // Type character
         KeyCode::Char(c) => {
             app.input.push(c);
         }
-        
+
         _ => {}
     }
     None
@@ -99,12 +101,12 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         KeyCode::Esc => {
             app.exit_search();
         }
-        
+
         // Jump to selected chat
         KeyCode::Enter => {
             app.jump_to_selected_search_result();
         }
-        
+
         // Navigate filtered results
         KeyCode::Down | KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.search_move_down();
@@ -119,19 +121,19 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         KeyCode::Up => {
             app.search_move_up();
         }
-        
+
         // Delete character
         KeyCode::Backspace => {
             app.search_input.pop();
             app.update_search_filter();
         }
-        
+
         // Type character to filter
         KeyCode::Char(c) => {
             app.search_input.push(c);
             app.update_search_filter();
         }
-        
+
         _ => {}
     }
     None
@@ -144,12 +146,12 @@ fn handle_account_picker_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         KeyCode::Esc => {
             app.exit_account_picker();
         }
-        
+
         // Select account
         KeyCode::Enter => {
             app.select_account();
         }
-        
+
         // Navigate accounts
         KeyCode::Down | KeyCode::Char('j') => {
             app.account_picker_move_down();
@@ -157,7 +159,7 @@ fn handle_account_picker_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         KeyCode::Up | KeyCode::Char('k') => {
             app.account_picker_move_up();
         }
-        
+
         _ => {}
     }
     None
@@ -170,12 +172,12 @@ fn handle_command_mode(app: &mut App, key: KeyEvent) -> Option<String> {
         KeyCode::Esc => {
             app.exit_command();
         }
-        
+
         // Execute command
         KeyCode::Enter => {
             app.execute_command();
         }
-        
+
         // Delete character
         KeyCode::Backspace => {
             if app.command_input.is_empty() {
@@ -184,12 +186,12 @@ fn handle_command_mode(app: &mut App, key: KeyEvent) -> Option<String> {
                 app.command_input.pop();
             }
         }
-        
+
         // Type character
         KeyCode::Char(c) => {
             app.command_input.push(c);
         }
-        
+
         _ => {}
     }
     None
@@ -198,13 +200,13 @@ fn handle_command_mode(app: &mut App, key: KeyEvent) -> Option<String> {
 /// Handle keys in find user mode (searching for user)
 fn handle_find_user_mode(app: &mut App, key: KeyEvent) -> Option<String> {
     use crate::app::FindResult;
-    
+
     match key.code {
         // Exit find mode
         KeyCode::Esc => {
             app.exit_find();
         }
-        
+
         // Jump to found user if successful
         KeyCode::Enter => {
             if let Some(FindResult::Found { .. }) = &app.find_result {
@@ -214,7 +216,77 @@ fn handle_find_user_mode(app: &mut App, key: KeyEvent) -> Option<String> {
                 app.exit_find();
             }
         }
-        
+
+        _ => {}
+    }
+    None
+}
+
+/// Handle keys in AI command mode
+fn handle_ai_command_mode(app: &mut App, key: KeyEvent) -> Option<String> {
+    match key.code {
+        // Exit AI command mode
+        KeyCode::Esc => {
+            app.exit_ai_command();
+        }
+
+        // Submit command
+        KeyCode::Enter => {
+            app.submit_ai_command();
+        }
+
+        // Delete character
+        KeyCode::Backspace => {
+            if app.ai_input.is_empty() {
+                app.exit_ai_command();
+            } else {
+                app.ai_input.pop();
+            }
+        }
+
+        // Type character
+        KeyCode::Char(c) => {
+            app.ai_input.push(c);
+        }
+
+        _ => {}
+    }
+    None
+}
+
+/// Handle keys in code assistant mode
+fn handle_code_mode(app: &mut App, key: KeyEvent) -> Option<String> {
+    match key.code {
+        // Exit code mode
+        KeyCode::Esc => {
+            app.exit_code_mode();
+        }
+
+        // Submit query
+        KeyCode::Enter => {
+            app.submit_code_query();
+        }
+
+        // Scroll output up
+        KeyCode::Up | KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.code_scroll = app.code_scroll.saturating_add(1);
+        }
+
+        // Scroll output down
+        KeyCode::Down | KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.code_scroll = app.code_scroll.saturating_sub(1);
+        }
+
+        // Delete character
+        KeyCode::Backspace => {
+            app.code_input.pop();
+        }
+
+        // Type character
+        KeyCode::Char(c) => {
+            app.code_input.push(c);
+        }
+
         _ => {}
     }
     None
